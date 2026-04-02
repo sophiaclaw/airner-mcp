@@ -27,6 +27,18 @@ const sheets_js_1 = require("./sheets.js");
 const agents_js_1 = require("./agents.js");
 const PORT = parseInt(process.env.PORT || '3000');
 const tasks = {};
+// Seed a test agent from environment if provided (for CI/E2E testing)
+if (process.env.SEED_AGENT_ID && process.env.SEED_AGENT_KEY) {
+    const existing = (0, agents_js_1.getAgent)(process.env.SEED_AGENT_ID);
+    if (!existing) {
+        const agent = (0, agents_js_1.registerAgent)(process.env.SEED_AGENT_ID);
+        // Override the auto-generated key with the seed key
+        const store = JSON.parse(require('fs').readFileSync(process.env.AGENTS_FILE || '/app/agents.json', 'utf-8'));
+        store.agents[agent.agent_id].api_key = process.env.SEED_AGENT_KEY;
+        require('fs').writeFileSync(process.env.AGENTS_FILE || '/app/agents.json', JSON.stringify(store, null, 2));
+        console.log('Seeded test agent:', process.env.SEED_AGENT_ID);
+    }
+}
 // ─────────────────────────────────────────────
 // MCP Server
 // ─────────────────────────────────────────────
