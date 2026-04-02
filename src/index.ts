@@ -22,7 +22,7 @@ import {
 import express from 'express';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
-import { appendTask, updateTaskStatus, getTaskFromSheet } from './sheets.js';
+import { appendTask, updateTaskStatus, getTaskFromSheet, appendToJobFeed } from './sheets.js';
 import { getAgent, incrementTaskUsage, registerAgent, validateApiKey } from './agents.js';
 
 const PORT = parseInt(process.env.PORT || '3000');
@@ -218,6 +218,17 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
         location: task.location,
         job_url: task.job_url || '',
         created_by: agent_id,
+      });
+      // Also post to Airner job feed so workers see it
+      await appendToJobFeed({
+        task_id,
+        task_description: task.task_description,
+        task_type: task.task_type,
+        payout_usdc: task.payout_usdc,
+        deadline_hours: task.deadline_hours,
+        language: task.language,
+        location: task.location,
+        job_url: task.job_url || '',
       });
     } catch (e) {
       console.error('Sheet write error:', e);

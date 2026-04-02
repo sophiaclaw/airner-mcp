@@ -92,3 +92,49 @@ export async function getTaskFromSheet(task_id: string): Promise<any> {
   // For MVP, tasks are tracked in memory. This is a no-op fallback.
   return null;
 }
+
+const JOB_FEED_SHEET_ID = process.env.JOB_FEED_SHEET_ID || '16kxUFgFgMWjeETiLK5mOsh12M0eTCOa1wpchn6r1Bak';
+
+export async function appendToJobFeed(task: {
+  task_id: string;
+  task_description: string;
+  task_type: string;
+  payout_usdc: number;
+  deadline_hours: number;
+  language?: string;
+  location?: string;
+  job_url: string;
+}) {
+  const row = [
+    task.task_description.slice(0, 100),              // Title
+    'AI & Data Tasks',                                 // Category
+    task.task_type,                                    // Subcategory
+    task.task_description,                             // Details
+    task.job_url,                                      // ProjectURL
+    task.location || 'Any',                            // Location
+    '',                                                // Gender
+    '',                                                // EducationLevel
+    task.language || 'Any',                            // NativeLanguage
+    '',                                                // SecondaryLanguage
+    '',                                                // SecondaryLanguageProficiency
+    '',                                                // Prefix
+    task.payout_usdc.toString(),                       // Payrate
+    'USDC',                                            // Currency
+    'Fixed',                                           // PaymentType
+    new Date(Date.now() + task.deadline_hours * 3600000).toISOString().split('T')[0], // ProjectDeadline
+    'Airtm Agent',                                     // Platform
+    new Date().toISOString().split('T')[0],            // Created
+    'AI Agent',                                        // Created by
+    new Date().toISOString().split('T')[0],            // Modified
+    'Open',                                            // Status
+    task.task_id,                                      // Standardized (using for task_id tracking)
+  ];
+
+  const params = JSON.stringify({
+    spreadsheetId: JOB_FEED_SHEET_ID,
+    range: 'Active_Projects STANDARIZED!A:W',
+    valueInputOption: 'USER_ENTERED',
+  });
+  const payload = JSON.stringify({ values: [row] });
+  spawnSync(GWS, ['sheets', 'spreadsheets', 'values', 'append', '--params', params, '--json', payload], { encoding: 'utf8' });
+}
