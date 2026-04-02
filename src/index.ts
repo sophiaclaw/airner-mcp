@@ -578,6 +578,31 @@ app.post('/task/:task_id/submit', async (req, res) => {
   }
 });
 
+
+// Admin: reset agent task quota (for testing only — secured by secret)
+app.post('/admin/reset-quota', (req, res) => {
+  const secret = req.headers['x-admin-secret'];
+  if (secret !== (process.env.ADMIN_SECRET || 'airner_admin_2026_reset')) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  const { agent_id } = req.body;
+  if (!agent_id) { res.status(400).json({ error: 'agent_id required' }); return; }
+  
+  try {
+    const fs = require('fs');
+    const agentsFile = process.env.AGENTS_FILE || '/app/agents.json';
+    const store = JSON.parse(fs.readFileSync(agentsFile, 'utf-8'));
+    if (!store.agents[agent_id]) { res.status(404).json({ error: 'Agent not found' }); return; }
+    store.agents[agent_id].tasks_used = 0;
+    store.agents[agent_id].tasks_remaining = 10;
+    fs.writeFileSync(agentsFile, JSON.stringify(store, null, 2));
+    res.json({ ok: true, agent_id, tasks_remaining: 10 });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to reset quota' });
+  }
+});
+
 // GitHub OAuth — redirect to GitHub
 app.get('/auth/github', (req, res) => {
   const redirect = req.query.redirect as string || 'https://go.airtm.com/hire/register';
@@ -591,6 +616,31 @@ app.get('/auth/github', (req, res) => {
   const state = Buffer.from(JSON.stringify({ redirect })).toString('base64');
   const github_url = `https://github.com/login/oauth/authorize?client_id=${client_id}&scope=read:user&state=${state}`;
   res.redirect(github_url);
+});
+
+
+// Admin: reset agent task quota (for testing only — secured by secret)
+app.post('/admin/reset-quota', (req, res) => {
+  const secret = req.headers['x-admin-secret'];
+  if (secret !== (process.env.ADMIN_SECRET || 'airner_admin_2026_reset')) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  const { agent_id } = req.body;
+  if (!agent_id) { res.status(400).json({ error: 'agent_id required' }); return; }
+  
+  try {
+    const fs = require('fs');
+    const agentsFile = process.env.AGENTS_FILE || '/app/agents.json';
+    const store = JSON.parse(fs.readFileSync(agentsFile, 'utf-8'));
+    if (!store.agents[agent_id]) { res.status(404).json({ error: 'Agent not found' }); return; }
+    store.agents[agent_id].tasks_used = 0;
+    store.agents[agent_id].tasks_remaining = 10;
+    fs.writeFileSync(agentsFile, JSON.stringify(store, null, 2));
+    res.json({ ok: true, agent_id, tasks_remaining: 10 });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to reset quota' });
+  }
 });
 
 // GitHub OAuth callback
