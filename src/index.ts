@@ -69,11 +69,22 @@ if (process.env.SEED_AGENT_ID && process.env.SEED_AGENT_KEY) {
   const existing = getAgent(process.env.SEED_AGENT_ID);
   if (!existing) {
     const agent = registerAgent(process.env.SEED_AGENT_ID);
-    // Override the auto-generated key with the seed key
     const store = JSON.parse(require('fs').readFileSync(process.env.AGENTS_FILE || '/app/agents.json', 'utf-8'));
     store.agents[agent.agent_id].api_key = process.env.SEED_AGENT_KEY;
     require('fs').writeFileSync(process.env.AGENTS_FILE || '/app/agents.json', JSON.stringify(store, null, 2));
     console.log('Seeded test agent:', process.env.SEED_AGENT_ID);
+  }
+}
+
+// Seed second agent if configured
+if (process.env.SEED_AGENT2_ID && process.env.SEED_AGENT2_KEY) {
+  const existing2 = getAgent(process.env.SEED_AGENT2_ID);
+  if (!existing2) {
+    const agent2 = registerAgent(process.env.SEED_AGENT2_ID);
+    const store2 = JSON.parse(require('fs').readFileSync(process.env.AGENTS_FILE || '/app/agents.json', 'utf-8'));
+    store2.agents[agent2.agent_id].api_key = process.env.SEED_AGENT2_KEY;
+    require('fs').writeFileSync(process.env.AGENTS_FILE || '/app/agents.json', JSON.stringify(store2, null, 2));
+    console.log('Seeded verify agent:', process.env.SEED_AGENT2_ID);
   }
 }
 
