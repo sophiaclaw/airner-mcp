@@ -22,7 +22,7 @@ import {
 import express from 'express';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
-import { appendTask, updateTaskStatus, getTaskFromSheet, appendToJobFeed } from './sheets.js';
+import { appendTask, updateTaskStatus, getTaskFromSheet } from './sheets.js';
 import { getAgent, incrementTaskUsage, registerAgent, validateApiKey } from './agents.js';
 
 const PORT = parseInt(process.env.PORT || '3000');
@@ -219,17 +219,37 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
         job_url: task.job_url || '',
         created_by: agent_id,
       });
-      // Also post to Airner job feed so workers see it
-      await appendToJobFeed({
-        task_id,
-        task_description: task.task_description,
-        task_type: task.task_type,
-        payout_usdc: task.payout_usdc,
-        deadline_hours: task.deadline_hours,
-        language: task.language,
-        location: task.location,
-        job_url: task.job_url || '',
-      });
+      // Also post to Airner job feed via webhook bridge (Mac Mini handles gws write)
+      if (process.env.JOB_FEED_WEBHOOK_URL) {
+        try {
+          const webhookPayload = JSON.stringify({
+            task_id,
+            task_description: task.task_description,
+            task_type: task.task_type,
+            payout_usdc: task.payout_usdc,
+            deadline_hours: task.deadline_hours,
+            language: task.language,
+            location: task.location,
+            job_url: task.job_url || '',
+          });
+          const https = require('https');
+          const url = new URL(process.env.JOB_FEED_WEBHOOK_URL);
+          const options = {
+            hostname: url.hostname,
+            path: url.pathname,
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Webhook-Secret': process.env.JOB_FEED_WEBHOOK_SECRET || '',
+              'Content-Length': Buffer.byteLength(webhookPayload),
+            },
+          };
+          const req = https.request(options);
+          req.on('error', () => {}); // non-fatal
+          req.write(webhookPayload);
+          req.end();
+        } catch (e) { /* non-fatal */ }
+      }
     } catch (e) {
       console.error('Sheet write error:', e);
       // Non-fatal — task still works via in-memory store
