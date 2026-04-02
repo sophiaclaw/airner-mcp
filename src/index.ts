@@ -381,7 +381,22 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
 // HTTP API Server (for web pages + OAuth)
 // ─────────────────────────────────────────────
 const app = express();
-app.use(cors());
+app.use(cors({ origin: ['https://go.airtm.com', 'https://airner-mcp.onrender.com', /\.trycloudflare\.com$/], credentials: true }));
+
+// Simple in-memory rate limiter (30 req/min per API key)
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+function checkRateLimit(apiKey: string): boolean {
+  const now = Date.now();
+  const entry = rateLimitMap.get(apiKey);
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(apiKey, { count: 1, resetAt: now + 60000 });
+    return true;
+  }
+  if (entry.count >= 30) return false;
+  entry.count += 1;
+  return true;
+}
+
 app.use(express.json());
 
 // Health check
