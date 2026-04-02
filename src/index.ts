@@ -204,16 +204,18 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     const task_id = uuidv4();
+
+    // Explicit payout validation before task construction
+    const rawPayout = parseFloat((args as any).payout_usdc);
+    if (!rawPayout || rawPayout <= 0 || isNaN(rawPayout)) {
+      throw new Error('payout_usdc must be a positive number greater than 0');
+    }
     const task: TaskRecord = {
       task_id,
       title: (args as any).task_description?.slice(0, 60) || 'Task',
       task_type: (args as any).task_type || 'Task',
       task_description: (args as any).task_description,
-      payout_usdc: (() => {
-        const v = parseFloat((args as any).payout_usdc);
-        if (!v || v <= 0 || isNaN(v)) throw new Error('payout_usdc must be a positive number greater than 0');
-        return v;
-      })(),
+      payout_usdc: rawPayout,
       workers_needed: parseInt((args as any).workers_needed) || 1,
       workers_accepted: 0,
       workers_completed: 0,
@@ -738,6 +740,14 @@ app.post('/tools/hire_human', async (req, res) => {
   }
 
   const task_id = uuidv4();
+
+  // Validate payout before task creation
+  const httpPayout = parseFloat(req.body.payout_usdc);
+  if (!httpPayout || httpPayout <= 0 || isNaN(httpPayout)) {
+    res.status(400).json({ error: 'payout_usdc must be a positive number greater than 0' });
+    return;
+  }
+
   const task: TaskRecord = {
     task_id,
     title: task_description.slice(0, 60),
