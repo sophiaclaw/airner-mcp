@@ -657,6 +657,13 @@ app.post('/tools/hire_human', async (req, res) => {
   const auth = authenticateAgent(req);
   if (auth.error) { res.status(401).json({ error: auth.error }); return; }
 
+  // Rate limit: 30 req/min per API key
+  const apiKey = req.headers['x-api-key'] as string;
+  if (!checkRateLimit(apiKey)) {
+    res.status(429).json({ error: 'Rate limit exceeded. Max 30 requests per minute per API key.' });
+    return;
+  }
+
   const agent = getAgent(auth.agent_id);
   if (!agent || agent.tasks_remaining <= 0) {
     res.status(403).json({ error: 'Free task limit reached. Contact sophia@airtm.io to upgrade.' });
@@ -735,6 +742,8 @@ app.post('/tools/hire_human', async (req, res) => {
 app.post('/tools/get_task_status', async (req, res) => {
   const auth = authenticateAgent(req);
   if (auth.error) { res.status(401).json({ error: auth.error }); return; }
+  const rlKey = req.headers['x-api-key'] as string;
+  if (!checkRateLimit(rlKey)) { res.status(429).json({ error: 'Rate limit exceeded.' }); return; }
 
   const { task_id } = req.body;
   if (!task_id) { res.status(400).json({ error: 'task_id required' }); return; }
@@ -764,6 +773,8 @@ app.post('/tools/get_task_status', async (req, res) => {
 app.post('/tools/get_task_result', async (req, res) => {
   const auth = authenticateAgent(req);
   if (auth.error) { res.status(401).json({ error: auth.error }); return; }
+  const rlKey = req.headers['x-api-key'] as string;
+  if (!checkRateLimit(rlKey)) { res.status(429).json({ error: 'Rate limit exceeded.' }); return; }
 
   const { task_id } = req.body;
   if (!task_id) { res.status(400).json({ error: 'task_id required' }); return; }
