@@ -25,6 +25,17 @@ import { v4 as uuidv4 } from 'uuid';
 import { appendTask, updateTaskStatus, getTaskFromSheet } from './sheets.js';
 import { getAgent, incrementTaskUsage, registerAgent, validateApiKey } from './agents.js';
 
+// XSS sanitization for API outputs
+function sanitizeOutput(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
+}
+
+
 const PORT = parseInt(process.env.PORT || '3000');
 
 // ─────────────────────────────────────────────
@@ -187,7 +198,11 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
       title: (args as any).task_description?.slice(0, 60) || 'Task',
       task_type: (args as any).task_type || 'Task',
       task_description: (args as any).task_description,
-      payout_usdc: parseFloat((args as any).payout_usdc) || 0,
+      payout_usdc: (() => {
+        const v = parseFloat((args as any).payout_usdc);
+        if (!v || v <= 0 || isNaN(v)) throw new Error('payout_usdc must be a positive number greater than 0');
+        return v;
+      })(),
       workers_needed: parseInt((args as any).workers_needed) || 1,
       workers_accepted: 0,
       workers_completed: 0,
@@ -462,6 +477,9 @@ app.post('/task/:task_id/accept', async (req, res) => {
 });
 
 // Worker submits proof
+// In-memory submit lock to prevent race conditions
+const submitLocks = new Set<string>();
+
 app.post('/task/:task_id/submit', async (req, res) => {
   const { task_id } = req.params;
   const { airtm_username, proof } = req.body;
@@ -477,29 +495,61 @@ app.post('/task/:task_id/submit', async (req, res) => {
     return;
   }
 
-  task.results.push({
-    worker_airtm_id: airtm_username,
-    proof,
-    submitted_at: new Date().toISOString(),
-  });
-  task.workers_completed += 1;
+  // FIX 3: Race condition lock — prevent concurrent submissions
+  if (submitLocks.has(task_id)) {
+    res.status(409).json({ error: 'Submission in progress. Please try again in a moment.' });
+    return;
+  }
 
+  // FIX 1: Reject if task already has enough completions
   if (task.workers_completed >= task.workers_needed) {
-    task.status = 'completed';
+    res.status(409).json({ error: 'This task has already been completed by the required number of workers.' });
+    return;
   }
 
-  // Update sheet
+  // FIX 2: Verify this worker accepted the task
+  const accepted = task.acceptances.find(a => a.worker_airtm_id === airtm_username);
+  if (!accepted) {
+    res.status(403).json({ error: 'You must accept this task before submitting proof.' });
+    return;
+  }
+
+  // FIX 1: Check if this worker already submitted
+  const alreadySubmitted = task.results.find(r => r.worker_airtm_id === airtm_username);
+  if (alreadySubmitted) {
+    res.status(409).json({ error: 'You have already submitted proof for this task.' });
+    return;
+  }
+
+  // Acquire lock
+  submitLocks.add(task_id);
   try {
-    await updateTaskStatus(task_id, 'Completed', airtm_username, proof);
-  } catch (e) {
-    console.error('Sheet update error:', e);
-  }
+    task.results.push({
+      worker_airtm_id: airtm_username,
+      proof,
+      submitted_at: new Date().toISOString(),
+    });
+    task.workers_completed += 1;
 
-  res.json({
-    ok: true,
-    message: 'Proof submitted. Payment will be sent to your Airtm account within 24h.',
-    payout_usdc: task.payout_usdc,
-  });
+    if (task.workers_completed >= task.workers_needed) {
+      task.status = 'completed';
+    }
+
+    // Update sheet
+    try {
+      await updateTaskStatus(task_id, 'Completed', airtm_username, proof);
+    } catch (e) {
+      console.error('Sheet update error:', e);
+    }
+
+    res.json({
+      ok: true,
+      message: 'Proof submitted. Payment will be sent to your Airtm account within 24h.',
+      payout_usdc: task.payout_usdc,
+    });
+  } finally {
+    submitLocks.delete(task_id);
+  }
 });
 
 // GitHub OAuth — redirect to GitHub
