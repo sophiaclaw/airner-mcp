@@ -38,6 +38,32 @@ function sanitizeOutput(str: string): string {
 
 const PORT = parseInt(process.env.PORT || '3000');
 
+// ─────────────────────────────────────────────
+// In-memory task store (MVP — complements sheet)
+// ─────────────────────────────────────────────
+interface TaskRecord {
+  task_id: string;
+  title: string;
+  task_type: string;
+  task_description: string;
+  payout_usdc: number;
+  workers_needed: number;
+  workers_accepted: number;
+  workers_completed: number;
+  deadline_hours: number;
+  language: string;
+  location: string;
+  created_by: string;
+  created_at: string;
+  status: 'open' | 'in_progress' | 'completed' | 'expired';
+  acceptances: Array<{ worker_airtm_id: string; phone?: string; accepted_at: string }>;
+  results: Array<{ worker_airtm_id: string; proof: string; submitted_at: string }>;
+  instructions: string;
+  job_url?: string;
+}
+
+const tasks: Record<string, TaskRecord> = {};
+
 // Load persisted tasks from Google Sheet on startup
 (async () => {
   try {
@@ -80,31 +106,6 @@ const PORT = parseInt(process.env.PORT || '3000');
   }
 })();
 
-// ─────────────────────────────────────────────
-// In-memory task store (MVP — complements sheet)
-// ─────────────────────────────────────────────
-interface TaskRecord {
-  task_id: string;
-  title: string;
-  task_type: string;
-  task_description: string;
-  payout_usdc: number;
-  workers_needed: number;
-  workers_accepted: number;
-  workers_completed: number;
-  deadline_hours: number;
-  language: string;
-  location: string;
-  created_by: string;
-  created_at: string;
-  status: 'open' | 'in_progress' | 'completed' | 'expired';
-  acceptances: Array<{ worker_airtm_id: string; phone?: string; accepted_at: string }>;
-  results: Array<{ worker_airtm_id: string; proof: string; submitted_at: string }>;
-  instructions: string;
-  job_url?: string;
-}
-
-const tasks: Record<string, TaskRecord> = {};
 
 // Seed a test agent from environment if provided (for CI/E2E testing)
 if (process.env.SEED_AGENT_ID && process.env.SEED_AGENT_KEY) {
