@@ -679,16 +679,9 @@ app.get('/auth/github/callback', async (req, res) => {
     // Register agent
     const agent = registerAgent(user.login);
 
-    // Get redirect URL from state or default to register page
-    let redirectUrl = 'https://go.airtm.com/hire/register';
-    try {
-      const stateData = JSON.parse(Buffer.from(state as string || '', 'base64').toString());
-      if (stateData.redirect) redirectUrl = stateData.redirect;
-    } catch {}
-
-    // Redirect back to register page with API key
-    const separator = redirectUrl.includes('?') ? '&' : '?';
-    res.redirect(`${redirectUrl}${separator}api_key=${agent.api_key}&agent_id=${agent.agent_id}&username=${user.login}`);
+    // Always redirect to base register URL (strip any existing query params to avoid duplication)
+    const baseRedirect = 'https://go.airtm.com/hire/register';
+    res.redirect(`${baseRedirect}?api_key=${agent.api_key}&agent_id=${agent.agent_id}&username=${user.login}`);
   } catch (e) {
     res.redirect('https://go.airtm.com/hire/register?error=oauth_failed');
   }
