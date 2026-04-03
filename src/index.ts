@@ -679,15 +679,18 @@ app.get('/auth/github/callback', async (req, res) => {
     // Register agent
     const agent = registerAgent(user.login);
 
-    res.json({
-      agent_id: agent.agent_id,
-      github_username: agent.github_username,
-      api_key: agent.api_key,
-      tasks_used: agent.tasks_used,
-      tasks_remaining: agent.tasks_remaining,
-    });
+    // Get redirect URL from state or default to register page
+    let redirectUrl = 'https://go.airtm.com/hire/register';
+    try {
+      const stateData = JSON.parse(Buffer.from(state as string || '', 'base64').toString());
+      if (stateData.redirect) redirectUrl = stateData.redirect;
+    } catch {}
+
+    // Redirect back to register page with API key
+    const separator = redirectUrl.includes('?') ? '&' : '?';
+    res.redirect(`${redirectUrl}${separator}api_key=${agent.api_key}&agent_id=${agent.agent_id}&username=${user.login}`);
   } catch (e) {
-    res.status(500).json({ error: 'Internal error during OAuth' });
+    res.redirect('https://go.airtm.com/hire/register?error=oauth_failed');
   }
 });
 
