@@ -138,3 +138,61 @@ export async function appendToJobFeed(task: {
   const payload = JSON.stringify({ values: [row] });
   spawnSync(GWS, ['sheets', 'spreadsheets', 'values', 'append', '--params', params, '--json', payload], { encoding: 'utf8' });
 }
+
+export async function loadTasksFromSheet(): Promise<Array<{
+  task_id: string;
+  title: string;
+  task_type: string;
+  task_description: string;
+  payout_usdc: number;
+  workers_needed: number;
+  deadline_hours: number;
+  language: string;
+  status: string;
+  job_url: string;
+  created_at: string;
+}>> {
+  try {
+    const params = JSON.stringify({ spreadsheetId: SHEET_ID, range: 'Tasks!A2:K10000' });
+    const result = spawnSync(GWS, ['sheets', 'spreadsheets', 'values', 'get', '--params', params], { encoding: 'utf8', timeout: 10000 });
+    if (result.status !== 0) return [];
+    const data = JSON.parse(result.stdout);
+    const rows = (data.values || []) as string[][];
+    return rows
+      .filter(r => r[0] && r[0].length > 5) // valid task_id
+      .map(r => ({
+        task_id: r[0] || '',
+        title: r[1] || '',
+        task_type: r[2] || '',
+        task_description: r[3] || '',
+        payout_usdc: parseFloat(r[4]) || 0,
+        workers_needed: parseInt(r[5]) || 1,
+        deadline_hours: parseInt(r[6]) || 24,
+        language: r[7] || 'Any',
+        status: r[8] || 'Open',
+        created_at: r[9] || '',
+        job_url: r[10] || '',
+      }));
+  } catch {
+    return [];
+  }
+}
+
+export async function loadSubmissionsFromSheet(task_id: string): Promise<Array<{
+  worker_airtm_id: string;
+  proof: string;
+  submitted_at: string;
+}>> {
+  try {
+    const params = JSON.stringify({ spreadsheetId: SHEET_ID, range: 'Submissions!A2:E10000' });
+    const result = spawnSync(GWS, ['sheets', 'spreadsheets', 'values', 'get', '--params', params], { encoding: 'utf8', timeout: 10000 });
+    if (result.status !== 0) return [];
+    const data = JSON.parse(result.stdout);
+    const rows = (data.values || []) as string[][];
+    return rows
+      .filter(r => r[0] === task_id)
+      .map(r => ({ worker_airtm_id: r[1] || '', proof: r[2] || '', submitted_at: r[3] || '' }));
+  } catch {
+    return [];
+  }
+}

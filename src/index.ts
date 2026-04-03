@@ -22,7 +22,7 @@ import {
 import express from 'express';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
-import { appendTask, updateTaskStatus, getTaskFromSheet } from './sheets.js';
+import { appendTask, updateTaskStatus, getTaskFromSheet, loadTasksFromSheet, loadSubmissionsFromSheet, appendToJobFeed } from './sheets.js';
 import { getAgent, incrementTaskUsage, registerAgent, validateApiKey } from './agents.js';
 
 // XSS sanitization for API outputs
@@ -37,6 +37,48 @@ function sanitizeOutput(str: string): string {
 
 
 const PORT = parseInt(process.env.PORT || '3000');
+
+// Load persisted tasks from Google Sheet on startup
+(async () => {
+  try {
+    const persistedTasks = await loadTasksFromSheet();
+    for (const pt of persistedTasks) {
+      if (!tasks[pt.task_id]) {
+        // Reconstruct minimal task record from sheet
+        const subs = await loadSubmissionsFromSheet(pt.task_id);
+        tasks[pt.task_id] = {
+          task_id: pt.task_id,
+          title: pt.title,
+          task_type: pt.task_type,
+          task_description: pt.task_description,
+          payout_usdc: pt.payout_usdc,
+          workers_needed: pt.workers_needed,
+          workers_accepted: 0,
+          workers_completed: subs.length,
+          deadline_hours: pt.deadline_hours,
+          language: pt.language,
+          location: 'Any',
+          created_by: 'restored',
+          created_at: pt.created_at,
+          status: subs.length >= pt.workers_needed ? 'completed' : 'open' as any,
+          acceptances: [],
+          results: subs.map(s => ({
+            worker_airtm_id: s.worker_airtm_id,
+            proof: s.proof,
+            submitted_at: s.submitted_at,
+          })),
+          instructions: pt.task_description,
+          job_url: pt.job_url,
+        };
+      }
+    }
+    if (persistedTasks.length > 0) {
+      console.log(`Restored ${persistedTasks.length} tasks from Google Sheet`);
+    }
+  } catch (e) {
+    console.error('Failed to restore tasks:', e);
+  }
+})();
 
 // ─────────────────────────────────────────────
 // In-memory task store (MVP — complements sheet)
