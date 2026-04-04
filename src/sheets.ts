@@ -1,4 +1,54 @@
 import { execSync, spawnSync } from 'child_process';
+import * as https from 'https';
+
+// Google Sheets API helper using service account JWT
+let _accessToken: string | null = null;
+let _tokenExpiry = 0;
+
+async function getAccessToken(): Promise<string> {
+  if (_accessToken && Date.now() < _tokenExpiry) return _accessToken;
+  
+  const saJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  if (!saJson) throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON not set');
+  
+  const sa = JSON.parse(saJson);
+  const now = Math.floor(Date.now() / 1000);
+  const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({
+    iss: sa.client_email,
+    scope: 'https://www.googleapis.com/auth/spreadsheets',
+    aud: 'https://oauth2.googleapis.com/token',
+    exp: now + 3600,
+    iat: now,
+  })).toString('base64url');
+  
+  const crypto = require('crypto');
+  const sign = crypto.createSign('RSA-SHA256');
+  sign.update(`${header}.${payload}`);
+  const sig = sign.sign(sa.private_key, 'base64url');
+  const jwt = `${header}.${payload}.${sig}`;
+  
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
+  });
+  const data = await res.json() as any;
+  _accessToken = data.access_token;
+  _tokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
+  return _accessToken!;
+}
+
+async function sheetsAppend(spreadsheetId: string, range: string, values: any[][]): Promise<void> {
+  const token = await getAccessToken();
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ values }),
+  });
+  if (!res.ok) throw new Error(`Sheets API error: ${await res.text()}`);
+}
 
 const SHEET_ID = '1inaRMstj81yN9J3MhTUzsu8R2GxlqwCNPOvgm_bKqbM';
 const GWS = '/Users/clawbot/.npm-global/bin/gws';
@@ -30,21 +80,16 @@ export async function appendTask(task: {
     task.job_url,
   ];
 
-  const paramsObj = { spreadsheetId: SHEET_ID, range: 'Tasks!A:K', valueInputOption: 'USER_ENTERED' };
-  const jsonObj = { values: [row] };
-  const result = spawnSync(GWS, [
-    'sheets', 'spreadsheets', 'values', 'append',
-    '--params', JSON.stringify(paramsObj),
-    '--json', JSON.stringify(jsonObj)
-  ], { encoding: 'utf8' });
-  if (result.status !== 0) throw new Error(result.stderr || 'Sheet append failed');
+  await sheetsAppend(SHEET_ID, 'Tasks!A:K', [row]);
 }
 
 export async function updateTaskStatus(task_id: string, status: string, worker_id?: string, proof?: string, payout_usdc?: number) {
   // Read all rows to find the right one
-  const params = JSON.stringify({ spreadsheetId: SHEET_ID, range: 'Tasks!A:K' });
-  const result = execSync(`${GWS} sheets spreadsheets values get --params '${params}'`, { encoding: 'utf8' });
-  const data = JSON.parse(result);
+  const tokenRead = await getAccessToken();
+  const readRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent('Tasks!A:K')}`, {
+    headers: { 'Authorization': `Bearer ${tokenRead}` }
+  });
+  const data = await readRes.json() as any;
   const rows = data.values || [];
   
   const idx = rows.findIndex((r: string[]) => r[0] === task_id);
@@ -57,7 +102,8 @@ export async function updateTaskStatus(task_id: string, status: string, worker_i
       valueInputOption: 'USER_ENTERED',
     });
     const subPayload = JSON.stringify({ values: [[task_id, worker_id, proof, new Date().toISOString(), 'pending_payment', payout_usdc !== undefined ? String(payout_usdc) : '', 'USDC']] });
-    spawnSync(GWS, ['sheets', 'spreadsheets', 'values', 'append', '--params', subParams, '--json', subPayload], { encoding: 'utf8' });
+    const subData = JSON.parse(subPayload);
+    await sheetsAppend(SHEET_ID, 'Submissions!A:G', subData.values || []);
   }
 
   if (idx === -1) return;
@@ -69,7 +115,13 @@ export async function updateTaskStatus(task_id: string, status: string, worker_i
     valueInputOption: 'USER_ENTERED',
   });
   const updatePayload = JSON.stringify({ values: [[status]] });
-  spawnSync(GWS, ['sheets', 'spreadsheets', 'values', 'update', '--params', updateParams, '--json', updatePayload], { encoding: 'utf8' });
+  const updateData = JSON.parse(updatePayload);
+  const token2 = await getAccessToken();
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent('Tasks!I' + rowNum)}?valueInputOption=USER_ENTERED`, {
+    method: 'PUT',
+    headers: { 'Authorization': `Bearer ${token2}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(updateData),
+  });
 
   // (submission already written above)
 }
@@ -136,7 +188,7 @@ export async function appendToJobFeed(task: {
     valueInputOption: 'USER_ENTERED',
   });
   const payload = JSON.stringify({ values: [row] });
-  spawnSync(GWS, ['sheets', 'spreadsheets', 'values', 'append', '--params', params, '--json', payload], { encoding: 'utf8' });
+  await sheetsAppend(JOB_FEED_SHEET_ID, 'Active_Projects STANDARIZED!A:W', JSON.parse(payload).values);
 }
 
 export async function loadTasksFromSheet(): Promise<Array<{
@@ -154,9 +206,11 @@ export async function loadTasksFromSheet(): Promise<Array<{
 }>> {
   try {
     const params = JSON.stringify({ spreadsheetId: SHEET_ID, range: 'Tasks!A2:K10000' });
-    const result = spawnSync(GWS, ['sheets', 'spreadsheets', 'values', 'get', '--params', params], { encoding: 'utf8', timeout: 10000 });
-    if (result.status !== 0) return [];
-    const data = JSON.parse(result.stdout);
+    const token = await getAccessToken();
+    const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent('Tasks!A2:K10000')}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await res.json() as any;
     const rows = (data.values || []) as string[][];
     return rows
       .filter(r => r[0] && r[0].length > 5) // valid task_id
@@ -185,9 +239,11 @@ export async function loadSubmissionsFromSheet(task_id: string): Promise<Array<{
 }>> {
   try {
     const params = JSON.stringify({ spreadsheetId: SHEET_ID, range: 'Submissions!A2:E10000' });
-    const result = spawnSync(GWS, ['sheets', 'spreadsheets', 'values', 'get', '--params', params], { encoding: 'utf8', timeout: 10000 });
-    if (result.status !== 0) return [];
-    const data = JSON.parse(result.stdout);
+    const token = await getAccessToken();
+    const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent('Tasks!A2:K10000')}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const data = await res.json() as any;
     const rows = (data.values || []) as string[][];
     return rows
       .filter(r => r[0] === task_id)
