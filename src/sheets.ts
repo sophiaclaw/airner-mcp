@@ -40,7 +40,7 @@ export async function appendTask(task: {
   if (result.status !== 0) throw new Error(result.stderr || 'Sheet append failed');
 }
 
-export async function updateTaskStatus(task_id: string, status: string, worker_id?: string, proof?: string) {
+export async function updateTaskStatus(task_id: string, status: string, worker_id?: string, proof?: string, payout_usdc?: number) {
   // Read all rows to find the right one
   const params = JSON.stringify({ spreadsheetId: SHEET_ID, range: 'Tasks!A:K' });
   const result = execSync(`${GWS} sheets spreadsheets values get --params '${params}'`, { encoding: 'utf8' });
@@ -56,7 +56,7 @@ export async function updateTaskStatus(task_id: string, status: string, worker_i
       range: 'Submissions!A:E',
       valueInputOption: 'USER_ENTERED',
     });
-    const subPayload = JSON.stringify({ values: [[task_id, worker_id, proof, new Date().toISOString(), 'pending_payment']] });
+    const subPayload = JSON.stringify({ values: [[task_id, worker_id, proof, new Date().toISOString(), 'pending_payment', payout_usdc !== undefined ? String(payout_usdc) : '', 'USDC']] });
     spawnSync(GWS, ['sheets', 'spreadsheets', 'values', 'append', '--params', subParams, '--json', subPayload], { encoding: 'utf8' });
   }
 

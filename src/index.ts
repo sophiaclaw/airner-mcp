@@ -608,7 +608,7 @@ app.post('/task/:task_id/submit', async (req, res) => {
 
     // Update sheet
     try {
-      await updateTaskStatus(task_id, 'Completed', airtm_username, proof);
+      await updateTaskStatus(task_id, 'Completed', airtm_username, proof, task.payout_usdc);
     } catch (e) {
       console.error('Sheet update error:', e);
     }
