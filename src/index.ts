@@ -275,11 +275,11 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     tasks[task_id] = task;
 
-    // Write task via bridge (reliable path)
+    // Write task via bridge (awaited — Render kills fire-and-forget)
     try {
       const bridgeUrl = process.env.SHEET_BRIDGE_URL || 'https://airner-sheet-bridge.onrender.com';
       const bridgeSecret = process.env.SHEET_BRIDGE_SECRET || 'airner_bridge_secret_2026';
-      fetch(bridgeUrl + '/', {
+      const bridgeRes = await fetch(bridgeUrl + '/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Bridge-Secret': bridgeSecret },
         body: JSON.stringify({
@@ -294,10 +294,10 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
           language: task.language,
           job_url: `https://go.airtm.com/hire/task.html?id=${task_id}`,
         }),
-      }).then((r: any) => r.json()).then((d: any) => {
-        if (d.ok) console.log('[bridge] ✅ Task written:', task_id);
-        else console.error('[bridge] ❌ Task write error:', JSON.stringify(d));
-      }).catch((e: Error) => console.error('[bridge] task fetch failed:', e.message));
+      });
+      const bridgeData = await bridgeRes.json() as any;
+      if (bridgeData.ok) console.log('[bridge] ✅ Task written:', task_id);
+      else console.error('[bridge] ❌ Task write error:', JSON.stringify(bridgeData));
     } catch (e) {
       console.error('[bridge] task write error:', (e as Error).message);
     }
@@ -633,11 +633,11 @@ app.post('/task/:task_id/submit', async (req, res) => {
       task.status = 'completed';
     }
 
-    // Write submission via bridge (reliable path)
+    // Write submission via bridge (awaited — Render kills fire-and-forget)
     try {
       const bridgeUrl = process.env.SHEET_BRIDGE_URL || 'https://airner-sheet-bridge.onrender.com';
       const bridgeSecret = process.env.SHEET_BRIDGE_SECRET || 'airner_bridge_secret_2026';
-      fetch(bridgeUrl + '/', {
+      const subRes = await fetch(bridgeUrl + '/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Bridge-Secret': bridgeSecret },
         body: JSON.stringify({
@@ -648,10 +648,10 @@ app.post('/task/:task_id/submit', async (req, res) => {
           payout_usdc: task.payout_usdc,
           submitted_at: new Date().toISOString(),
         }),
-      }).then(r => r.json()).then((d: any) => {
-        if (d.ok) console.log('[bridge] ✅ Submission written:', task_id, airtm_username, '$'+task.payout_usdc);
-        else console.error('[bridge] ❌ Error:', JSON.stringify(d));
-      }).catch(e => console.error('[bridge] fetch failed:', e.message));
+      });
+      const subData = await subRes.json() as any;
+      if (subData.ok) console.log('[bridge] ✅ Submission written:', task_id, airtm_username, '$'+task.payout_usdc);
+      else console.error('[bridge] ❌ Error:', JSON.stringify(subData));
     } catch (e) {
       console.error('[submit] bridge call error:', (e as Error).message);
     }
