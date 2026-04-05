@@ -606,11 +606,27 @@ app.post('/task/:task_id/submit', async (req, res) => {
       task.status = 'completed';
     }
 
-    // Write submission directly (fast path)
+    // Write submission via bridge (reliable path)
     try {
-      await writeSubmission(task_id, airtm_username, proof, task.payout_usdc);
+      const bridgeUrl = process.env.SHEET_BRIDGE_URL || 'https://airner-sheet-bridge.onrender.com';
+      const bridgeSecret = process.env.SHEET_BRIDGE_SECRET || 'airner_bridge_secret_2026';
+      fetch(bridgeUrl + '/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Bridge-Secret': bridgeSecret },
+        body: JSON.stringify({
+          type: 'submission',
+          task_id,
+          worker_id: airtm_username,
+          proof,
+          payout_usdc: task.payout_usdc,
+          submitted_at: new Date().toISOString(),
+        }),
+      }).then(r => r.json()).then((d: any) => {
+        if (d.ok) console.log('[bridge] ✅ Submission written:', task_id, airtm_username, '$'+task.payout_usdc);
+        else console.error('[bridge] ❌ Error:', JSON.stringify(d));
+      }).catch(e => console.error('[bridge] fetch failed:', e.message));
     } catch (e) {
-      console.error('[submit] writeSubmission error:', (e as Error).message);
+      console.error('[submit] bridge call error:', (e as Error).message);
     }
     // Update sheet
     try {
