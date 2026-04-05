@@ -113,8 +113,13 @@ export async function updateTaskStatus(task_id: string, status: string, worker_i
       valueInputOption: 'USER_ENTERED',
     });
     const subPayload = JSON.stringify({ values: [[task_id, worker_id, proof, new Date().toISOString(), 'pending_payment', payout_usdc !== undefined ? String(payout_usdc) : '', 'USDC']] });
-    const subData = JSON.parse(subPayload);
-    await sheetsAppend(SHEET_ID, 'Submissions!A:G', subData.values || []);
+    try {
+      const subRow = [task_id, worker_id, (proof || '').substring(0, 500), new Date().toISOString(), 'pending_payment', payout_usdc !== undefined ? String(payout_usdc) : '', 'USDC'];
+      await sheetsAppend(SHEET_ID, 'Submissions!A:G', [subRow]);
+      console.log('[sheets] ✅ Submission written:', task_id, worker_id, '$'+payout_usdc);
+    } catch (subErr) {
+      console.error('[sheets] ❌ Submission write failed:', (subErr as Error).message);
+    }
   }
 
   if (idx === -1) return;
