@@ -72,6 +72,36 @@ export async function appendTask(task: {
   job_url: string;
   created_by?: string;
 }) {
+  // Try bridge first (works on Render)
+  const bridgeUrl = process.env.SHEET_BRIDGE_URL;
+  const bridgeSecret = process.env.SHEET_BRIDGE_SECRET;
+  if (bridgeUrl && bridgeSecret) {
+    try {
+      const res = await fetch(bridgeUrl + '/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Bridge-Secret': bridgeSecret },
+        body: JSON.stringify({
+          type: 'task',
+          task_id: task.task_id,
+          title: task.title,
+          task_type: task.task_type,
+          description: task.task_description,
+          payout_usdc: task.payout_usdc,
+          workers_needed: task.workers_needed,
+          deadline_hours: task.deadline_hours,
+          language: task.language,
+          job_url: task.job_url,
+        }),
+      });
+      const d = await res.json() as any;
+      if (d.ok) { console.log('[sheets] ✅ Task written via bridge:', task.task_id); return; }
+      console.error('[sheets] Bridge task write error:', JSON.stringify(d));
+    } catch (e) {
+      console.error('[sheets] Bridge task write failed:', (e as Error).message);
+    }
+  }
+
+  // Fallback: direct Sheets API (works locally)
   const row = [
     task.task_id,
     task.title,
