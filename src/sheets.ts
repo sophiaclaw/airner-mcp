@@ -86,7 +86,12 @@ export async function appendTask(task: {
     task.job_url,
   ];
 
-  await sheetsAppend(SHEET_ID, 'Tasks!A:K', [row]);
+  try {
+    await sheetsAppend(SHEET_ID, 'Tasks!A:K', [row]);
+    console.log('[sheets] Task written:', task.task_id);
+  } catch (e) {
+    console.error('[sheets] TASK WRITE FAILED:', (e as Error).message);
+  }
 }
 
 export async function updateTaskStatus(task_id: string, status: string, worker_id?: string, proof?: string, payout_usdc?: number) {
