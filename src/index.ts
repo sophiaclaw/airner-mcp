@@ -918,23 +918,31 @@ app.post('/tools/hire_human', async (req, res) => {
 
   tasks[task_id] = task;
 
-  // Write to Google Sheet
+  // Write task via bridge (awaited)
   try {
-    await appendTask({
-      task_id,
-      title: task.title,
-      task_type: task.task_type,
-      task_description: task.task_description,
-      payout_usdc: task.payout_usdc,
-      workers_needed: task.workers_needed,
-      deadline_hours: task.deadline_hours,
-      language: task.language,
-      location: task.location,
-      job_url: task.job_url || '',
-      created_by: auth.agent_id,
+    const bridgeUrl = process.env.SHEET_BRIDGE_URL || 'https://airner-sheet-bridge.onrender.com';
+    const bridgeSecret = process.env.SHEET_BRIDGE_SECRET || 'airner_bridge_secret_2026';
+    const br = await fetch(bridgeUrl + '/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Bridge-Secret': bridgeSecret },
+      body: JSON.stringify({
+        type: 'task',
+        task_id,
+        title: task.title,
+        task_type: task.task_type,
+        description: task.task_description,
+        payout_usdc: task.payout_usdc,
+        workers_needed: task.workers_needed,
+        deadline_hours: task.deadline_hours,
+        language: task.language,
+        job_url: `https://go.airtm.com/hire/task.html?id=${task_id}`,
+      }),
     });
+    const bd = await br.json() as any;
+    if (bd.ok) console.log('[bridge] ✅ Task written (HTTP):', task_id);
+    else console.error('[bridge] ❌ Task write error (HTTP):', JSON.stringify(bd));
   } catch (e) {
-    console.error('Sheet write error (non-fatal):', (e as Error).message);
+    console.error('[bridge] task HTTP write error:', (e as Error).message);
   }
 
   try { incrementTaskUsage(auth.agent_id); } catch (e) { /* ignore */ }
