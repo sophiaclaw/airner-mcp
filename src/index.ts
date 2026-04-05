@@ -648,6 +648,36 @@ app.post('/admin/reset-quota', (req, res) => {
   }
 });
 
+
+// Admin: test sheet write directly
+app.post('/admin/test-sheets', async (req, res) => {
+  const secret = req.headers['x-admin-secret'];
+  if (secret !== (process.env.ADMIN_SECRET || 'airner_admin_2026_reset')) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  try {
+    const { appendTask, appendToJobFeed } = require('./sheets.js');
+    const testTask = {
+      task_id: 'test-' + Date.now(),
+      title: 'Sheet test',
+      task_type: 'test',
+      task_description: 'Testing sheet write from Render',
+      payout_usdc: 1.0,
+      workers_needed: 1,
+      deadline_hours: 1,
+      language: 'en',
+      location: 'Any',
+      job_url: 'https://test.com',
+      created_by: 'admin',
+    };
+    await appendTask(testTask);
+    res.json({ ok: true, message: 'Sheet write successful' });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message, stack: (e as Error).stack?.split('\n').slice(0,3).join(' | ') });
+  }
+});
+
 // GitHub OAuth — redirect to GitHub
 app.get('/auth/github', (req, res) => {
   const redirect = req.query.redirect as string || 'https://go.airtm.com/hire/register';
@@ -685,6 +715,36 @@ app.post('/admin/reset-quota', (req, res) => {
     res.json({ ok: true, agent_id, tasks_remaining: 10 });
   } catch (e) {
     res.status(500).json({ error: 'Failed to reset quota' });
+  }
+});
+
+
+// Admin: test sheet write directly
+app.post('/admin/test-sheets', async (req, res) => {
+  const secret = req.headers['x-admin-secret'];
+  if (secret !== (process.env.ADMIN_SECRET || 'airner_admin_2026_reset')) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  try {
+    const { appendTask, appendToJobFeed } = require('./sheets.js');
+    const testTask = {
+      task_id: 'test-' + Date.now(),
+      title: 'Sheet test',
+      task_type: 'test',
+      task_description: 'Testing sheet write from Render',
+      payout_usdc: 1.0,
+      workers_needed: 1,
+      deadline_hours: 1,
+      language: 'en',
+      location: 'Any',
+      job_url: 'https://test.com',
+      created_by: 'admin',
+    };
+    await appendTask(testTask);
+    res.json({ ok: true, message: 'Sheet write successful' });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: (e as Error).message, stack: (e as Error).stack?.split('\n').slice(0,3).join(' | ') });
   }
 });
 
