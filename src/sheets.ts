@@ -268,3 +268,22 @@ export async function loadSubmissionsFromSheet(task_id: string): Promise<Array<{
     return [];
   }
 }
+
+// Simple submission write - completely independent
+export async function writeSubmission(task_id: string, worker_id: string, proof: string, payout_usdc?: number): Promise<void> {
+  try {
+    const row = [
+      task_id,
+      worker_id,
+      (proof || '').substring(0, 500),
+      new Date().toISOString(),
+      'pending_payment',
+      payout_usdc !== undefined ? String(payout_usdc) : '0',
+      'USDC',
+    ];
+    await sheetsAppend(SHEET_ID, 'Submissions!A:G', [row]);
+    console.log('[sheets] ✅ Submission persisted:', task_id, worker_id, '$'+payout_usdc);
+  } catch (e) {
+    console.error('[sheets] ❌ Submission persist failed:', (e as Error).message);
+  }
+}

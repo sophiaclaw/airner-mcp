@@ -22,7 +22,7 @@ import {
 import express from 'express';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
-import { appendTask, updateTaskStatus, getTaskFromSheet, loadTasksFromSheet, loadSubmissionsFromSheet, appendToJobFeed } from './sheets.js';
+import { appendTask, updateTaskStatus, getTaskFromSheet, loadTasksFromSheet, loadSubmissionsFromSheet, appendToJobFeed, writeSubmission } from './sheets.js';
 import { getAgent, incrementTaskUsage, registerAgent, validateApiKey } from './agents.js';
 
 // XSS sanitization for API outputs
@@ -606,6 +606,12 @@ app.post('/task/:task_id/submit', async (req, res) => {
       task.status = 'completed';
     }
 
+    // Write submission directly (fast path)
+    try {
+      await writeSubmission(task_id, airtm_username, proof, task.payout_usdc);
+    } catch (e) {
+      console.error('[submit] writeSubmission error:', (e as Error).message);
+    }
     // Update sheet
     try {
       await updateTaskStatus(task_id, 'Completed', airtm_username, proof, task.payout_usdc);
