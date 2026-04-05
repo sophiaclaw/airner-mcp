@@ -275,7 +275,34 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     tasks[task_id] = task;
 
-    // Write to Google Sheet
+    // Write task via bridge (reliable path)
+    try {
+      const bridgeUrl = process.env.SHEET_BRIDGE_URL || 'https://airner-sheet-bridge.onrender.com';
+      const bridgeSecret = process.env.SHEET_BRIDGE_SECRET || 'airner_bridge_secret_2026';
+      fetch(bridgeUrl + '/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Bridge-Secret': bridgeSecret },
+        body: JSON.stringify({
+          type: 'task',
+          task_id,
+          title: task.title,
+          task_type: task.task_type,
+          description: task.task_description,
+          payout_usdc: task.payout_usdc,
+          workers_needed: task.workers_needed,
+          deadline_hours: task.deadline_hours,
+          language: task.language,
+          job_url: `https://go.airtm.com/hire/task.html?id=${task_id}`,
+        }),
+      }).then((r: any) => r.json()).then((d: any) => {
+        if (d.ok) console.log('[bridge] ✅ Task written:', task_id);
+        else console.error('[bridge] ❌ Task write error:', JSON.stringify(d));
+      }).catch((e: Error) => console.error('[bridge] task fetch failed:', e.message));
+    } catch (e) {
+      console.error('[bridge] task write error:', (e as Error).message);
+    }
+
+    // Write to Google Sheet (legacy — may fail on Render)
     try {
       await appendTask({
         task_id,
