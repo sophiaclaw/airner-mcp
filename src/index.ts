@@ -25,6 +25,16 @@ import { v4 as uuidv4 } from 'uuid';
 import { appendTask, updateTaskStatus, getTaskFromSheet, loadTasksFromSheet, loadSubmissionsFromSheet, appendToJobFeed, writeSubmission } from './sheets.js';
 import { getAgent, incrementTaskUsage, registerAgent, validateApiKey } from './agents.js';
 
+// ─────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────
+interface TaskApproval {
+  approved: boolean;
+  feedback?: string;
+  approved_at: string;
+  approved_by: string;
+}
+
 // XSS sanitization for API outputs
 function sanitizeOutput(str: string): string {
   return str
@@ -55,11 +65,12 @@ interface TaskRecord {
   location: string;
   created_by: string;
   created_at: string;
-  status: 'open' | 'in_progress' | 'completed' | 'expired';
+  status: 'open' | 'in_progress' | 'completed' | 'expired' | 'approved' | 'rejected';
   acceptances: Array<{ worker_airtm_id: string; phone?: string; accepted_at: string }>;
   results: Array<{ worker_airtm_id: string; proof: string; submitted_at: string }>;
   instructions: string;
   job_url?: string;
+  approval?: TaskApproval;
 }
 
 const tasks: Record<string, TaskRecord> = {};
@@ -195,6 +206,28 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
         },
         required: ['task_id'],
+      },
+    },
+    {
+      name: 'approve_task',
+      description: 'Review a completed task submission. Approve to trigger USDC payment to the worker, or reject to re-open the task for another worker.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          task_id: {
+            type: 'string',
+            description: 'The task ID returned by hire_human()',
+          },
+          approved: {
+            type: 'boolean',
+            description: 'true to approve and trigger payment, false to reject and re-open',
+          },
+          feedback: {
+            type: 'string',
+            description: 'Optional feedback for the worker',
+          },
+        },
+        required: ['task_id', 'approved'],
       },
     },
     {
@@ -426,6 +459,67 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   }
 
+  if (name === 'approve_task') {
+    if (!agent_id || !api_key || !validateApiKey(agent_id, api_key)) {
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ error: 'Invalid agent credentials.' }) }],
+        isError: true,
+      };
+    }
+    const task_id = (args as any).task_id;
+    const approved = (args as any).approved as boolean;
+    const feedback = (args as any).feedback as string | undefined;
+    const task = tasks[task_id];
+    if (!task) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: 'Task not found' }) }], isError: true };
+    }
+    if (task.results.length === 0) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: 'No submission to review yet. Wait for a worker to complete the task.' }) }], isError: true };
+    }
+    const worker_id = task.results[0].worker_airtm_id;
+    const approved_at = new Date().toISOString();
+    // Fire bridge notification (non-fatal)
+    try {
+      const bridgeUrl = process.env.SHEET_BRIDGE_URL || 'https://airner-sheet-bridge.onrender.com';
+      const bridgeSecret = process.env.SHEET_BRIDGE_SECRET || 'airner_bridge_secret_2026';
+      fetch(bridgeUrl + '/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Bridge-Secret': bridgeSecret },
+        body: JSON.stringify({ type: 'approval', task_id, worker_id, approved, payout_usdc: task.payout_usdc, feedback, approved_at }),
+      }).then(r => r.json()).then((d: any) => {
+        if (d.ok) console.log('[bridge] ✅ Approval recorded:', task_id, approved);
+        else console.error('[bridge] ❌ Approval error:', JSON.stringify(d));
+      }).catch((e: Error) => console.error('[bridge] approval error:', e.message));
+    } catch (e) { /* non-fatal */ }
+    if (approved) {
+      task.status = 'approved';
+      task.approval = { approved: true, feedback, approved_at, approved_by: agent_id };
+      return {
+        content: [{ type: 'text', text: JSON.stringify({
+          ok: true,
+          task_id,
+          worker_airtm_id: worker_id,
+          payout_usdc: task.payout_usdc,
+          message: `Task approved. Payment of $${task.payout_usdc} USDC will be sent to ${worker_id} within 24h.`,
+        }) }],
+      };
+    } else {
+      task.status = 'open';
+      task.results = [];
+      task.acceptances = [];
+      task.workers_accepted = 0;
+      task.workers_completed = 0;
+      task.approval = { approved: false, feedback, approved_at, approved_by: agent_id };
+      return {
+        content: [{ type: 'text', text: JSON.stringify({
+          ok: true,
+          task_id,
+          message: 'Task rejected. Re-opened for another worker.',
+        }) }],
+      };
+    }
+  }
+
   if (name === 'get_task_result') {
     const task_id = (args as any).task_id;
     const task = tasks[task_id];
@@ -446,6 +540,7 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
         text: JSON.stringify({
           status: task.status,
           results: task.results,
+          approval: task.approval,
           payout_note: task.results.length > 0
             ? `Send $${task.payout_usdc} USDC to each worker_airtm_id via Airtm. ${task.results.length} worker(s) completed this task.`
             : 'No results yet.',
@@ -1015,10 +1110,76 @@ app.post('/tools/get_task_result', async (req, res) => {
   res.json({
     status: task.status,
     results: task.results,
+    approval: task.approval,
     payout_note: task.results.length > 0
       ? `Send $${task.payout_usdc} USDC to each worker_airtm_id via Airtm. ${task.results.length} worker(s) completed.`
       : 'No results yet. Poll get_task_status first.',
   });
+});
+
+app.post('/tools/approve_task', async (req, res) => {
+  const auth = authenticateAgent(req);
+  if (auth.error) { res.status(401).json({ error: auth.error }); return; }
+  const rlKey = req.headers['x-api-key'] as string;
+  if (!checkRateLimit(rlKey)) { res.status(429).json({ error: 'Rate limit exceeded.' }); return; }
+
+  const { task_id, approved, feedback } = req.body;
+  if (!task_id || approved === undefined) {
+    res.status(400).json({ error: 'Required: task_id, approved (boolean)' });
+    return;
+  }
+
+  const task = tasks[task_id];
+  if (!task) {
+    res.status(404).json({ error: 'Task not found' });
+    return;
+  }
+
+  if (task.results.length === 0) {
+    res.status(409).json({ error: 'No submission to review yet. Wait for a worker to complete the task.' });
+    return;
+  }
+
+  const worker_id = task.results[0].worker_airtm_id;
+  const approved_at = new Date().toISOString();
+
+  // Fire bridge notification (non-fatal)
+  try {
+    const bridgeUrl = process.env.SHEET_BRIDGE_URL || 'https://airner-sheet-bridge.onrender.com';
+    const bridgeSecret = process.env.SHEET_BRIDGE_SECRET || 'airner_bridge_secret_2026';
+    fetch(bridgeUrl + '/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Bridge-Secret': bridgeSecret },
+      body: JSON.stringify({ type: 'approval', task_id, worker_id, approved, payout_usdc: task.payout_usdc, feedback, approved_at }),
+    }).then(r => r.json()).then((d: any) => {
+      if (d.ok) console.log('[bridge] ✅ Approval recorded (HTTP):', task_id, approved);
+      else console.error('[bridge] ❌ Approval error (HTTP):', JSON.stringify(d));
+    }).catch((e: Error) => console.error('[bridge] approval HTTP error:', e.message));
+  } catch (e) { /* non-fatal */ }
+
+  if (approved) {
+    task.status = 'approved';
+    task.approval = { approved: true, feedback, approved_at, approved_by: auth.agent_id };
+    res.json({
+      ok: true,
+      task_id,
+      worker_airtm_id: worker_id,
+      payout_usdc: task.payout_usdc,
+      message: `Task approved. Payment of $${task.payout_usdc} USDC will be sent to ${worker_id} within 24h.`,
+    });
+  } else {
+    task.status = 'open';
+    task.results = [];
+    task.acceptances = [];
+    task.workers_accepted = 0;
+    task.workers_completed = 0;
+    task.approval = { approved: false, feedback, approved_at, approved_by: auth.agent_id };
+    res.json({
+      ok: true,
+      task_id,
+      message: 'Task rejected. Re-opened for another worker.',
+    });
+  }
 });
 
 // ─────────────────────────────────────────────
